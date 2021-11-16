@@ -99,6 +99,24 @@ def draw_matches(src1, src2, kp1, kp2, matches, drawing_type):
             cv2.circle(output, tuple(map(int, right)), 1, color, 2)
     return output
 
+def visualizePosition(img,kp1,kp2,matches,title):
+    src_pts = np.float32([ kp1[m.queryIdx].pt for m in matches ]).reshape(-1,1,2)
+    dst_pts = np.float32([ kp2[m.trainIdx].pt for m in matches ]).reshape(-1,1,2)
+    M, mask = cv2.findHomography(dst_pts,src_pts, cv2.RANSAC,5.0)
+    matchesMask = mask.ravel().tolist()
+    h,w,d = img.shape
+    pts = np.float32([ [0,0],[0,h-1],[w-1,h-1],[w-1,0] ]).reshape(-1,1,2)
+    #pts = np.float32([ [0,0],[0,150],[150,150],[151,0]]).reshape(-1,1,2)
+    dst = cv2.perspectiveTransform(pts,M)
+    print(pts)
+    if title == "ORB":
+        rect = cv2.polylines(img,[np.int64(dst)],True,(255,0,255),1, cv2.LINE_AA)
+    else:
+        rect = cv2.polylines(img,[np.int64(dst)],True,(0,255,0),1, cv2.LINE_AA)
+    #dim = (width*2, 2*height)
+    #rect = cv2.resize(rect, dim, interpolation = cv2.INTER_AREA)
+    cv2.imshow(title,rect)
+
 def getHomography(kpsA, kpsB, featuresA, featuresB, matches, reprojThresh):
     # convert the keypoints to numpy arrays
     kpsA = np.float32([kp.pt for kp in kpsA])
@@ -119,17 +137,17 @@ def getHomography(kpsA, kpsB, featuresA, featuresB, matches, reprojThresh):
         return None
 
 if __name__ == '__main__':
-    
+    start = time.time()
     # Read Img
     wf = cv2.imread("./wf.jpg")
-    mf = cv2.imread("./mf00.jpg")
+    mf = cv2.imread("./mf01.jpg")
     img1 = cv2.imread("./wf.jpg")
-    img2 = cv2.imread("./mf00.jpg")
+    img2 = cv2.imread("./mf01.jpg")
 
     print ("wf shape : ",img1.shape)
     print ("mf shape : ",img2.shape)
     # Define Search Area
-    x1 = 0
+    x1 = 500
     y1 = 2000
     x2 = x1+1600
     y2 = y1+1000
@@ -144,96 +162,45 @@ if __name__ == '__main__':
     img1 = cv2.resize(img1, dim, interpolation = cv2.INTER_AREA)
     img2 = cv2.resize(img2, dim, interpolation = cv2.INTER_AREA)
     
-    # Feature Detect & Match
+    # ORB Feature Detect & Match
     orb = cv2.ORB_create(10000)
     orb.setFastThreshold(0)
-
-    descriptor = cv2.xfeatures2d.SIFT_create()
-
-
     kp1, des1 = orb.detectAndCompute(img1, None)
     kp2, des2 = orb.detectAndCompute(img2, None)
-    matcher = cv2.BFMatcher(cv2.NORM_HAMMING) # NORM_HAMMING
-    matches_all = matcher.match(des1, des2)
-
-    start = time.time()
+    bf = cv2.BFMatcher(cv2.NORM_HAMMING) # NORM_HAMMING
+    matches_all = bf.match(des1, des2)
+    # The matches with shorter distance are the ones we want.
+    #matches_gms = sorted(matches_all, key = lambda x : x.distance)[0:20]
     matches_gms = matchGMS(img1.shape[:2], img2.shape[:2], kp1, kp2, matches_all, withScale=True, withRotation=False, thresholdFactor=6)
+    print("matches_gms  : ",len(matches_gms))
+
+    #SHIFT Detect & Match
+    descriptor = cv2.xfeatures2d.SIFT_create()
+    kp1_s, des1_s = descriptor.detectAndCompute(img1, None)
+    kp2_s, des2_s = descriptor.detectAndCompute(img2, None)
+    FLANN_INDEX_KDTREE = 1
+    index_params = dict(algorithm = FLANN_INDEX_KDTREE, trees = 5)
+    search_params = dict(checks = 50)
+    flann = cv2.FlannBasedMatcher(index_params, search_params)
+    matches = flann.knnMatch(des1_s,des2_s,k=2)
+    # store all the good matches as per Lowe's ratio test.
+    good = []
+    for m,n in matches:
+        if m.distance < 0.9*n.distance:
+            good.append(m)
+
+    print("Good         : ",len(good))
+    
+
+
+    
+    # Draw Outputs
+    output = draw_matches(img1, img2, kp1, kp2, matches_gms, DrawingType.COLOR_CODED_POINTS_X)
+    visualizePosition(img1,kp1,kp2,matches_gms,"ORB")
+    visualizePosition(img1,kp1_s,kp2_s,good,"SHIFT")
     end = time.time()
 
-    print('Found', len(matches_gms), 'matches')
-    print('GMS takes', end-start, 'seconds')
+    print('Total Time: ', end-start, 'seconds')
     
-
-    #-------------------------------------------------------------------------------
-    """
-    list_kp1 = [kp1[mat.queryIdx].pt for mat in matches_gms]
-    list_kp2 = [kp2[mat.queryIdx].pt for mat in matches_gms]
-
-    print(list_kp1[0][1])
-    print(list_kp2[0][1])
-
-    M = getHomography(kp1, kp2, des1, des2, matches_gms, reprojThresh=50)
-    if M is None:
-        print("Error!")
-    (matches, H, status) = M
-    print(H)
-
-
-    img_matches = img1#np.empty((max(img2.shape[0], img1.shape[0]), img2.shape[1]+img1.shape[1], 3), dtype=np.uint8)
-    #-- Get the corners from the image_1 ( the object to be "detected" )
-    img_object = img2
-
-    obj_corners = np.empty((4,1,2), dtype=np.float32)
-    obj_corners[0,0,0] = 0+3
-    obj_corners[0,0,1] = 0+3
-    obj_corners[1,0,0] = img_object.shape[1]-3
-    obj_corners[1,0,1] = 0+3
-    obj_corners[2,0,0] = img_object.shape[1]-3
-    obj_corners[2,0,1] = img_object.shape[0]-3
-    obj_corners[3,0,0] = 0+3
-    obj_corners[3,0,1] = img_object.shape[0]-3
-
-    dst  = cv2.perspectiveTransform(obj_corners, H)
-    #-- Draw lines between the corners (the mapped object in the scene - image_2 )
-    img_matches = cv2.polylines(img_matches,[np.int32(dst)],True,(255,0,0),20, cv2.LINE_AA)
-    cv2.imshow('Good Matches & Object detection', img_matches)
-    print(img_matches.shape)
-
-
-
-
-    
-    trainImg = img1
-    queryImg = img2
-    width = trainImg.shape[1] #+ queryImg.shape[1]
-    height = trainImg.shape[0] #+ queryImg.shape[0]
-
-    result = cv2.warpPerspective(img_object, H, (width, height))
-    #result[0:queryImg.shape[0], 0:queryImg.shape[1]] = queryImg
-
-    print(result.shape)
-    cv2.imshow("r",result)
-    """
-
-    #-------------------------------------------------------------------------------
-    src_pts = np.float32([ kp1[m.queryIdx].pt for m in matches_gms ]).reshape(-1,1,2)
-    dst_pts = np.float32([ kp2[m.trainIdx].pt for m in matches_gms ]).reshape(-1,1,2)
-    M, mask = cv2.findHomography(dst_pts,src_pts, cv2.RANSAC,5.0)
-    matchesMask = mask.ravel().tolist()
-    h,w,d = img1.shape
-    pts = np.float32([ [0,0],[0,h-1],[w-1,h-1],[w-1,0] ]).reshape(-1,1,2)
-    #pts = np.float32([ [0,0],[0,150],[150,150],[151,0]]).reshape(-1,1,2)
-    dst = cv2.perspectiveTransform(pts,M)
-    print(pts)
-    rect = cv2.polylines(img1,[np.int64(dst)],True,(255,0,255),3, cv2.LINE_AA)
-    #dim = (width*2, 2*height)
-    #rect = cv2.resize(rect, dim, interpolation = cv2.INTER_AREA)
-    cv2.imshow("rectangle",rect)
-    #-------------------------------------------------------------------------------
-    # Draw Outputs
-    output = draw_matches(img1, img2, kp1, kp2, matches_gms, DrawingType.ONLY_LINES)
-    
-
-
     cv2.imshow("show", output)
     cv2.waitKey(0)
