@@ -1,7 +1,3 @@
-"""
-11.17.21
-Ahmet Gazi ÇİFCİ
-"""
 import cv2
 import time
 import glob, os
@@ -136,7 +132,8 @@ if __name__ == '__main__':
     width,height = 1600,1000
     
     # Read Img
-    wf = cv2.imread("./wf.jpg")
+    wf = cv2.imread("./wf.JPG")
+    
     files = os.listdir("./")
     #os.chdir("./")
     for img_name in glob.glob("*.JPG"):
@@ -145,15 +142,11 @@ if __name__ == '__main__':
         best_score = -999
         best_area_index = -999
 
-        #if int(img_name[2:-4])<8:
-        #    continue
-
         if img_name[:-4] != "wf":
             mf = cv2.imread(img_name)
             for i,area in enumerate(search_areas):
                 print("Area ",i," - ", end = '')
 
-                #area = search_areas[int(img_name[2:-4])]
                 img1, img2 = preprocessImg(wf,mf,area,width,height)
                 score = matchORB(img1,img2,False)
                 #score = matchSIFT(img1,img2,False)
@@ -161,14 +154,10 @@ if __name__ == '__main__':
                     best_score = score
                     best_area = area
 
-            print(best_area)
             # Visualize The Best Fit Area
             img1, img2 = preprocessImg(wf,mf,best_area,width,height)
             score = matchORB(img1,img2,True)
             #score = matchSIFT(img1,img2,True)
-            #del search_areas[best_area_index]
             cv2.waitKey(0)
 
-    #end = time.time()
-    #print('Total Time: ', end-start, 'seconds')
 
