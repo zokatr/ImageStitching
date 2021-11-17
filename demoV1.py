@@ -1,23 +1,33 @@
-import numpy as np
-import glob, os
-from enum import Enum
-import time
+"""
+11.17.21
+Ahmet Gazi ÇİFCİ
+"""
 import cv2
+import time
+import glob, os
+import numpy as np
 from cv2.xfeatures2d import matchGMS
-import matplotlib.pyplot as plt
+
 
 
 def preprocessImg(wf,mf,area,width,height):
+    """
+    Crop the area from wide-field image and resize mf and cropped image
+    wf: wide-field image
+    mf: medium-field image
+    return: resized images
+    """
 
-    # Define Search Area
+    # Define Search Area Coord.
     x1 = area[0]
     y1 = area[1]
     x2 = x1+width
     y2 = y1+height
     
-    # Crop wf  and resize mf
+    # Crop wf
     img1 = wf[y1:y2, x1:x2]
 
+    #TODO: w-h should not be harcoded here.
     # Resize mf & wf
     w = 800
     h = 500
@@ -30,42 +40,47 @@ def preprocessImg(wf,mf,area,width,height):
 
 def visualizePosition(img1,img2,kp1,kp2,matches,title):
     """
+    Draw a rectangle to matched area &  Overlay the medium image to wide image
     img1 : wide field
     img2 : medium field
     title: algorithm name
-    Draw rectangle
-    Overlay the medium img
     """
 
+    # Find the homography matrix
     h,w,d = img1.shape
     src_pts = np.float32([ kp1[m.queryIdx].pt for m in matches ]).reshape(-1,1,2)
     dst_pts = np.float32([ kp2[m.trainIdx].pt for m in matches ]).reshape(-1,1,2)
-    M, mask = cv2.findHomography(dst_pts,src_pts, cv2.RANSAC, 6.0)
+    H, mask = cv2.findHomography(dst_pts,src_pts, cv2.RANSAC, 6.0)
     matchesMask = mask.ravel().tolist()
 
-    pts = np.float32([ [0,0],[0,h-1],[w-1,h-1],[w-1,0] ]).reshape(-1,1,2)
-    
-    dst = cv2.perspectiveTransform(pts,M)
-    warped_img = cv2.warpPerspective(img2, M, (w, h))
-    overlayed_img = cv2.addWeighted(img1,0.6,warped_img,0.4,0)
+    # Find the corresponding points for rectange
+    pts = np.float32([ [0,0],[0,h-1],[w-1,h-1],[w-1,0] ]).reshape(-1,1,2)     
+    dst = cv2.perspectiveTransform(pts,H)
 
-    if title == "ORB":
-        rect = cv2.polylines(img1,[np.int64(dst)],True,(0,255,0),1, cv2.LINE_AA)
-        overlayed_img = cv2.polylines(overlayed_img,[np.int64(dst)],True,(0,255,0),1, cv2.LINE_AA)
-    else:
-        rect = cv2.polylines(img1,[np.int64(dst)],True,(0,255,255),1, cv2.LINE_AA)
-    
+    # Warp the medium image and overlay to cropped-wide image.
+    warped_img = cv2.warpPerspective(img2, H, (w, h))
+    overlayed_img = cv2.addWeighted(img1,0.9,warped_img,0.2,0)
+
+    # Draw and show the results
+    img_rectangle = cv2.polylines(img1,[np.int64(dst)],True,(0,255,0),1, cv2.LINE_AA)
+    overlayed_img = cv2.polylines(overlayed_img,[np.int64(dst)],True,(0,255,0),1, cv2.LINE_AA)
 
     draw_params = dict(matchColor = (0,255,0),
                    singlePointColor = None,
                    matchesMask = matchesMask, # draw only inliers
                    flags = 2)
     output = cv2.drawMatches(img1,kp1,img2,kp2,matches,None,**draw_params)
-
+    title = title+" - Overlayed Img"
     cv2.imshow(title,overlayed_img)
     cv2.imshow("matches",output)
 
 def matchORB(img1,img2,last_call):
+    """
+    Detection & matching the features with ORB
+    img1 : wide field
+    img2 : medium field
+    last_call: visualization flag - True/False
+    """
     
     # ORB Feature Detect & Match
     orb = cv2.ORB_create(10000)
@@ -75,15 +90,16 @@ def matchORB(img1,img2,last_call):
     bf = cv2.BFMatcher(cv2.NORM_HAMMING)
     matches_all = bf.match(des1, des2)
 
-    #matches_gms = sorted(matches_all, key = lambda x : x.distance)[0:20]
-    #@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
-    matches_gms = matchGMS(img1.shape[:2], img2.shape[:2], kp1, kp2, matches_all, withScale=True, withRotation=True, thresholdFactor=6)
+    # Filter the matches
+    matches_gms = matchGMS(img1.shape[:2], img2.shape[:2], kp1, kp2, matches_all, withScale=True, withRotation=False, thresholdFactor=6)
     
     # Draw Outputs
     if last_call:
         visualizePosition(img1,img2,kp1,kp2,matches_gms,"ORB")
 
-    print("GMS COUNT  : ",len(matches_gms))
+    print("ORB-GMS Match count : ",len(matches_gms))
+
+    # To detect the matching area in wide field img, return the count of feature match
     score = len(matches_gms)
     return score
 
@@ -108,31 +124,36 @@ def matchSIFT(img1,img2,last_call):
     # Draw Outputs
     if last_call:
         visualizePosition(img1,img2,kp1_s,kp2_s,good,"SHIFT")
-    print("SIFT COUNT : ",len(good))
+    print("SIFT Match count : ",len(good))
 
     return len(good)
 
 
 if __name__ == '__main__':
 
-    start = time.time()
+    #start = time.time()
     search_areas = [[95,1945],[510,1990],[1015,1855],[1500,1700],[1860,1855],[2355,1850],[2950,1850],[3425,1820],[3920,1830],[4160,1775],[4650,1765],[5150,1775]]
     width,height = 1600,1000
     
     # Read Img
     wf = cv2.imread("./wf.jpg")
     files = os.listdir("./")
-    os.chdir("./")
-    for file in glob.glob("*.JPG"):
+    #os.chdir("./")
+    for img_name in glob.glob("*.JPG"):
 
-        print("file ",file)
+        print("img_name: ",img_name)
         best_score = -999
         best_area_index = -999
 
-        if file[:-4] != "wf":
-            mf = cv2.imread(file)
-            for i,area in enumerate(search_areas):
+        #if int(img_name[2:-4])<8:
+        #    continue
 
+        if img_name[:-4] != "wf":
+            mf = cv2.imread(img_name)
+            for i,area in enumerate(search_areas):
+                print("Area ",i," - ", end = '')
+
+                #area = search_areas[int(img_name[2:-4])]
                 img1, img2 = preprocessImg(wf,mf,area,width,height)
                 score = matchORB(img1,img2,False)
                 #score = matchSIFT(img1,img2,False)
@@ -140,24 +161,14 @@ if __name__ == '__main__':
                     best_score = score
                     best_area = area
 
-
-            
+            print(best_area)
+            # Visualize The Best Fit Area
             img1, img2 = preprocessImg(wf,mf,best_area,width,height)
             score = matchORB(img1,img2,True)
             #score = matchSIFT(img1,img2,True)
-            
             #del search_areas[best_area_index]
             cv2.waitKey(0)
 
+    #end = time.time()
+    #print('Total Time: ', end-start, 'seconds')
 
-
-    
-    # Draw Outputs
-    #visualizePosition(img1,img2,kp1,kp2,matches_gms,"ORB")
-    #visualizePosition(img1,img2,kp1_s,kp2_s,good,"SHIFT")
-  
-    end = time.time()
-    print('Total Time: ', end-start, 'seconds')
-    
-    #cv2.imshow("show", output)
-    cv2.waitKey(0)
